@@ -5,7 +5,7 @@ export interface TelegramMessage {
   date: string;
   images: string[];
   videos: string[];
-  documents: { url: string; title: string; size?: string }[]; // PDFs, files
+  documents: { url: string; title: string; size?: string; suggestedFilename?: string }[]; // PDFs, files
   links: string[];
   channel: string;
   groupedId?: string | null; // For grouped messages (albums)

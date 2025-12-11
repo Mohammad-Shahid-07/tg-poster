@@ -11,6 +11,7 @@ export interface AdminDecision {
     shouldPost: boolean;
     reason: string;
     transformedText: string;
+    suggestedFilename?: string; // AI-suggested filename for PDFs with gibberish names
 }
 
 // Alias for batch processing
@@ -59,12 +60,31 @@ async function callMistral(
 }
 
 /**
+ * Check if a filename looks like gibberish (random numbers, IDs)
+ */
+function isGibberishFilename(filename: string): boolean {
+    // Remove extension
+    const name = filename.replace(/\.[^/.]+$/, "");
+
+    // Check patterns that indicate gibberish:
+    // - Long numbers (Telegram IDs like 5_6185745408757605272)
+    // - Mostly numbers with underscores
+    // - No readable words
+    const hasOnlyNumbers = /^[\d_\-]+$/.test(name);
+    const hasLongNumbers = /\d{8,}/.test(name);
+    const hasMostlyNumbers = (name.match(/\d/g) || []).length > name.length * 0.6;
+
+    return hasOnlyNumbers || hasLongNumbers || hasMostlyNumbers;
+}
+
+/**
  * The main AI admin function - evaluates AND transforms content
  */
 export async function evaluateContent(
     text: string,
     imageUrls: string[] = [],
-    sourceChannel: string
+    sourceChannel: string,
+    documents: { url: string; title: string; size?: string }[] = []
 ): Promise<AdminDecision> {
     if (!MISTRAL_API_KEY) {
         console.warn("[AI Admin] No API key - passing through original");
@@ -74,7 +94,14 @@ export async function evaluateContent(
     console.log(`[AI Admin] Processing content from @${sourceChannel}...`);
 
     const hasImages = imageUrls.length > 0;
+    const hasDocs = documents.length > 0;
     const model = hasImages ? aiConfig.models.contentEvaluation : aiConfig.models.textDecision;
+
+    // Check if any document needs renaming
+    const needsRename = hasDocs && documents.some(d => isGibberishFilename(d.title));
+    const docInfo = hasDocs
+        ? `\nDOCUMENT(S): ${documents.map(d => `"${d.title}" (${d.size || 'unknown size'})`).join(", ")}`
+        : "";
 
     // Build the prompt - this is the key part
     const systemPrompt = `You are admin for "${aiConfig.channel.name}".
@@ -83,10 +110,11 @@ STYLE RULES (VERY IMPORTANT):
 1. Keep it SHORT - 2-4 lines max, no essays
 2. Use BILINGUAL - mix Hindi + English naturally (Hinglish style)
 3. Be CASUAL - like chatting with friends, not formal corporate
-4. NO filler text - no "Stay prepared!", "Good luck!", "Stay informed!"
-5. NO excessive emojis - 1-2 max, or none
-6. NO hashtags unless truly necessary
-7. Just state the facts directly
+4. Use NON-FORMAL Hindi - "baki" not "shesh", "abhi" not "vartman", casual everyday words
+5. NO filler text - no "Stay prepared!", "Good luck!", "Stay informed!"
+6. NO excessive emojis - 1-2 max, or none
+7. NO hashtags unless truly necessary
+8. Just state the facts directly
 
 GOOD EXAMPLE:
 "RPSC ka जलवा बरकरार 
@@ -103,13 +131,20 @@ Stay informed and keep preparing! 🚀
 
 WHAT TO DO:
 - Skip if not relevant to rajasthan govt exams
+- SKIP image-only posts that are just screenshots/photos of notes, handwritten text, or small portions of printed material
 - Remove source channel branding (@mentions, join links)
 - Keep original information, just clean it up
 - Use hindi/english both 
 - Give as much info possible in the caption
+${needsRename ? `
+PDF FILENAME:
+- The current filename is gibberish/random numbers
+- Suggest a BETTER filename based on content (use English, underscores, keep short)
+- Example: "RPSC_APO_Result_2024.pdf" instead of "5_6185745408757605272.pdf"
+- Add "suggestedFilename" to your response` : ""}
 
 RESPOND JSON:
-{"shouldPost": true/false, "reason": "short reason", "transformedText": "your short version"}`;
+{"shouldPost": true/false, "reason": "short reason", "transformedText": "your short version"${needsRename ? ', "suggestedFilename": "Better_Name.pdf"' : ""}}`;
 
 
     const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
@@ -119,12 +154,13 @@ RESPOND JSON:
         text: `SOURCE: @${sourceChannel}
 
 ORIGINAL CONTENT:
-${text || "(only images, no text)"}
+${text || "(only images/documents, no text)"}${docInfo}
 
 ${hasImages ? `This post has ${imageUrls.length} image(s).` : ""}
 
 Now evaluate and REWRITE this content. Remember: don't just copy, create YOUR version.`,
     });
+
 
     // Add images for vision analysis
     for (const url of imageUrls.slice(0, 3)) {
@@ -229,10 +265,12 @@ STYLE RULES:
 - Keep it SHORT - 2-4 lines max
 - Use BILINGUAL - mix Hindi + English naturally
 - Be CASUAL - no formal corporate tone
+- Use NON-FORMAL Hindi - "baki" not "shesh", "abhi" not "vartman", casual everyday words
 - NO filler text, excessive emojis, or unnecessary hashtags
 - Remove source channel branding (@mentions, join links)
 - Do not add any channel link asking to join the channel regardless of what the channel is about
 - For images: use the ORIGINAL CAPTION to understand what the image is about
+- SKIP image-only posts that are just screenshots/photos of notes, handwritten text, or small portions of printed material
 
 RESPOND with JSON array (one object per message):
 [

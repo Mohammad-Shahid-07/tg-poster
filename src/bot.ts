@@ -99,11 +99,14 @@ export async function postMessage(
         if (!doc?.url) return;
 
         try {
-            console.log(`[Bot] Downloading document: ${doc.title}`);
-            const docPath = await downloadMedia(doc.url, `${message.id}_doc`);
+            // Use AI-suggested filename or original title
+            const filename = doc.suggestedFilename || doc.title;
+            console.log(`[Bot] Downloading document: ${doc.title}${doc.suggestedFilename ? ` → ${doc.suggestedFilename}` : ""}`);
+
+            const docPath = await downloadMedia(doc.url, `${message.id}_doc`, filename);
 
             if (docPath) {
-                await b.api.sendDocument(config.channelId, new InputFile(docPath), {
+                await b.api.sendDocument(config.channelId, new InputFile(docPath, filename), {
                     caption: text || doc.title,
                     parse_mode: "HTML",
                 });
@@ -114,7 +117,7 @@ export async function postMessage(
             console.error("[Bot] Failed to send document:", err);
         }
 
-        // Fallback: try URL directly
+        // Fallback: try URL directly (can't rename with this method)
         try {
             await b.api.sendDocument(config.channelId, doc.url, {
                 caption: text || doc.title,
@@ -137,7 +140,8 @@ export async function postMessage(
  */
 async function downloadMedia(
     url: string,
-    messageId: string
+    messageId: string,
+    customFilename?: string
 ): Promise<string | null> {
     try {
         const response = await fetch(url);
@@ -145,7 +149,9 @@ async function downloadMedia(
 
         const buffer = await response.arrayBuffer();
         const ext = url.split(".").pop()?.split("?")[0] || "jpg";
-        const filename = `${messageId}.${ext}`;
+
+        // Use custom filename if provided, otherwise generate from messageId
+        const filename = customFilename || `${messageId}.${ext}`;
         const filepath = join(config.mediaDir, filename);
 
         writeFileSync(filepath, Buffer.from(buffer));

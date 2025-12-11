@@ -199,7 +199,8 @@ async function processSingleMessage(message: TelegramMessage): Promise<void> {
     const decision = await evaluateContent(
         message.text,
         message.images,
-        message.channel
+        message.channel,
+        message.documents // Pass documents for AI to suggest better filenames
     );
 
     if (!decision.shouldPost) {
@@ -208,9 +209,19 @@ async function processSingleMessage(message: TelegramMessage): Promise<void> {
         return;
     }
 
+    // Apply AI-suggested filename if provided
+    let transformedDocs = message.documents;
+    if (decision.suggestedFilename && message.documents && message.documents.length > 0) {
+        console.log(`[Poster] 📝 Renaming PDF: "${message.documents[0]?.title}" → "${decision.suggestedFilename}"`);
+        transformedDocs = message.documents.map((doc, i) =>
+            i === 0 ? { ...doc, suggestedFilename: decision.suggestedFilename } : doc
+        );
+    }
+
     const transformedMessage: TelegramMessage = {
         ...message,
         text: decision.transformedText || message.text,
+        documents: transformedDocs,
     };
 
     await postMessageWithRetry(transformedMessage);
@@ -219,11 +230,67 @@ async function processSingleMessage(message: TelegramMessage): Promise<void> {
 }
 
 /**
+ * Get a content fingerprint for deduplication
+ * Combines text/caption + document filenames
+ */
+function getContentFingerprint(msg: TelegramMessage): string {
+    const textPart = (msg.text || "").trim().toLowerCase();
+    const docPart = (msg.documents || [])
+        .map(d => d.title?.toLowerCase() || "")
+        .sort()
+        .join("|");
+    return `${textPart}::${docPart}`;
+}
+
+/**
  * Process a batch of messages with a single AI call
  */
 async function processBatch(messages: TelegramMessage[]): Promise<void> {
-    // Batch evaluation - single AI call for multiple messages
-    const decisions = await evaluateBatch(messages);
+    // ==========================================
+    // Deduplicate within batch before AI call
+    // If multiple messages have same content, only send one to AI
+    // ==========================================
+    const fingerprints = new Map<string, number>(); // fingerprint -> first index
+    const duplicateOf = new Map<number, number>(); // index -> original index
+    const uniqueMessages: TelegramMessage[] = [];
+    const uniqueIndices: number[] = [];
+
+    for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+        if (!msg) continue;
+
+        const fp = getContentFingerprint(msg);
+
+        if (fp && fp !== "::" && fingerprints.has(fp)) {
+            // This is a duplicate - mark it
+            const originalIdx = fingerprints.get(fp)!;
+            duplicateOf.set(i, originalIdx);
+            console.log(`[Poster] 🔄 Duplicate detected: @${msg.channel}/${msg.id} same as earlier message`);
+        } else {
+            // First time seeing this content
+            fingerprints.set(fp, i);
+            uniqueMessages.push(msg);
+            uniqueIndices.push(i);
+        }
+    }
+
+    console.log(`[Poster] Batch: ${messages.length} messages, ${uniqueMessages.length} unique (${messages.length - uniqueMessages.length} duplicates)`);
+
+    // Get AI decisions for unique messages only
+    const uniqueDecisions = await evaluateBatch(uniqueMessages);
+
+    // Map decisions back to all messages (including duplicates)
+    const decisions: (AdminDecision | undefined)[] = new Array(messages.length);
+
+    // First, assign decisions to unique messages
+    for (let i = 0; i < uniqueIndices.length; i++) {
+        decisions[uniqueIndices[i]!] = uniqueDecisions[i];
+    }
+
+    // Then, copy decisions to duplicates
+    for (const [dupIdx, origIdx] of duplicateOf.entries()) {
+        decisions[dupIdx] = decisions[origIdx];
+    }
 
     for (let i = 0; i < messages.length; i++) {
         const message = messages[i];
