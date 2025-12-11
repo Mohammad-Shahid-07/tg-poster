@@ -1,10 +1,20 @@
 import cron from "node-cron";
+import { createServer } from "http";
 import { config, ensureDirectories, validateConfig, loadLastProcessed } from "./config";
 import { runPoster } from "./poster";
 import { initBot } from "./bot";
 import { validateChannels } from "./scraper";
 import { loadPostedContent } from "./content-tracker";
 import { isStorageConfigured } from "./storage";
+
+// Health check server for Render
+const PORT = process.env.PORT || 10000;
+createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("OK - Telegram Poster Bot Running");
+}).listen(PORT, () => {
+    console.log(`[Health] Server listening on port ${PORT}`);
+});
 
 async function main() {
     console.log("=================================");
