@@ -231,6 +231,7 @@ STYLE RULES:
 - Be CASUAL - no formal corporate tone
 - NO filler text, excessive emojis, or unnecessary hashtags
 - Remove source channel branding (@mentions, join links)
+- Do not add any channel link asking to join the channel regardless of what the channel is about
 - For images: use the ORIGINAL CAPTION to understand what the image is about
 
 RESPOND with JSON array (one object per message):
