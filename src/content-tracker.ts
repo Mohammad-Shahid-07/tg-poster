@@ -1,9 +1,8 @@
 /**
- * Content Tracker - Prevents duplicate posts using AI
+ * Content Tracker - Prevents duplicate posts using AI + Supabase storage
  */
 
-import { existsSync, readFileSync, writeFileSync } from "fs";
-import { config } from "./config";
+import { getValue, setValue, isStorageConfigured } from "./storage";
 import { aiConfig } from "./ai-config";
 
 interface PostedContent {
@@ -14,29 +13,21 @@ interface PostedContent {
     postedAt: string;
 }
 
-interface ContentStore {
-    posts: PostedContent[];
-}
+const MAX_STORED_POSTS = 100;
 
-const STORE_PATH = () => `${config.dataDir}/posted-content.json`;
-const MAX_STORED_POSTS = 500;
+// In-memory cache
+let postsCache: PostedContent[] = [];
+let cacheLoaded = false;
 
-function loadStore(): ContentStore {
-    try {
-        if (existsSync(STORE_PATH())) {
-            return JSON.parse(readFileSync(STORE_PATH(), "utf-8"));
-        }
-    } catch {
-        // ignore
+/**
+ * Load posts from Supabase (call on startup)
+ */
+export async function loadPostedContent(): Promise<void> {
+    if (isStorageConfigured()) {
+        postsCache = await getValue<PostedContent[]>("posted_content", []);
+        console.log("[Dedup] Loaded", postsCache.length, "posts from Supabase");
     }
-    return { posts: [] };
-}
-
-function saveStore(store: ContentStore): void {
-    if (store.posts.length > MAX_STORED_POSTS) {
-        store.posts = store.posts.slice(-MAX_STORED_POSTS);
-    }
-    writeFileSync(STORE_PATH(), JSON.stringify(store, null, 2));
+    cacheLoaded = true;
 }
 
 function hashContent(text: string): string {
@@ -80,27 +71,26 @@ async function generateSummary(text: string): Promise<string> {
 }
 
 /**
- * Check for duplicates using AI semantic comparison
+ * Check for duplicates using AI
  */
 export async function isDuplicate(text: string, imageCount: number): Promise<{ isDupe: boolean; reason?: string }> {
     if (!text.trim() && imageCount === 0) return { isDupe: false };
 
-    const store = loadStore();
     const currentHash = hashContent(text);
 
     // Exact hash match
-    const exactMatch = store.posts.find((p) => p.hash === currentHash);
+    const exactMatch = postsCache.find((p) => p.hash === currentHash);
     if (exactMatch) {
         return { isDupe: true, reason: `Exact match from @${exactMatch.sourceChannel}` };
     }
 
-    if (store.posts.length === 0) return { isDupe: false };
+    if (postsCache.length === 0) return { isDupe: false };
 
     const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
     if (!MISTRAL_API_KEY) return { isDupe: false };
 
-    // Send last 20 summaries to AI for comparison
-    const recentPosts = store.posts.slice(-20);
+    // Send last 20 summaries to AI
+    const recentPosts = postsCache.slice(-20);
     const summariesList = recentPosts.map((p, i) => `${i + 1}. [${p.sourceChannel}] ${p.summary}`).join("\n");
 
     console.log(`[Dedup] Checking against ${recentPosts.length} recent posts...`);
@@ -116,7 +106,7 @@ export async function isDuplicate(text: string, imageCount: number): Promise<{ i
                 model: aiConfig.models.textDecision,
                 messages: [{
                     role: "user",
-                    content: `Recent posts:\n${summariesList}\n\nNEW:\n${text.slice(0, 1000)}\n\nIs NEW a duplicate of any recent post? Same exam/announcement = duplicate.\nJSON only: {"isDuplicate": true/false, "matchedPost": <num or null>, "reason": "why"}`,
+                    content: `Recent posts:\n${summariesList}\n\nNEW:\n${text.slice(0, 1000)}\n\nIs NEW a duplicate? Same exam/announcement = duplicate.\nJSON only: {"isDuplicate": true/false, "matchedPost": <num or null>, "reason": "why"}`,
                 }],
                 max_tokens: 100,
                 temperature: 0.1,
@@ -126,7 +116,6 @@ export async function isDuplicate(text: string, imageCount: number): Promise<{ i
         const data = (await response.json()) as any;
         let content = data.choices?.[0]?.message?.content || "";
 
-        // Extract JSON
         const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
         if (jsonMatch?.[1]) content = jsonMatch[1];
 
@@ -147,13 +136,12 @@ export async function isDuplicate(text: string, imageCount: number): Promise<{ i
 }
 
 /**
- * Record a post to prevent future duplicates
+ * Record a post
  */
 export async function recordPost(text: string, sourceChannel: string, originalId: string): Promise<void> {
-    const store = loadStore();
     const summary = await generateSummary(text);
 
-    store.posts.push({
+    postsCache.push({
         summary,
         hash: hashContent(text),
         sourceChannel,
@@ -161,6 +149,15 @@ export async function recordPost(text: string, sourceChannel: string, originalId
         postedAt: new Date().toISOString(),
     });
 
-    saveStore(store);
+    // Trim to max size
+    if (postsCache.length > MAX_STORED_POSTS) {
+        postsCache = postsCache.slice(-MAX_STORED_POSTS);
+    }
+
+    // Save to Supabase
+    if (isStorageConfigured()) {
+        await setValue("posted_content", postsCache);
+    }
+
     console.log(`[Dedup] Recorded: "${summary}"`);
 }

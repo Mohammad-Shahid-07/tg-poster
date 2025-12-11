@@ -1,8 +1,10 @@
 import cron from "node-cron";
-import { config, ensureDirectories, validateConfig } from "./config";
+import { config, ensureDirectories, validateConfig, loadLastProcessed } from "./config";
 import { runPoster } from "./poster";
 import { initBot } from "./bot";
 import { validateChannels } from "./scraper";
+import { loadPostedContent } from "./content-tracker";
+import { isStorageConfigured } from "./storage";
 
 async function main() {
     console.log("=================================");
@@ -23,6 +25,15 @@ async function main() {
 
     // Ensure directories exist
     ensureDirectories();
+
+    // Load data from Supabase (if configured)
+    if (isStorageConfigured()) {
+        console.log("[Storage] Supabase configured - loading data...");
+        await loadLastProcessed();
+        await loadPostedContent();
+    } else {
+        console.log("[Storage] No Supabase - using in-memory storage (data will be lost on restart)");
+    }
 
     // Initialize bot
     initBot();

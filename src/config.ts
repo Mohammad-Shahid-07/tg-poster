@@ -1,26 +1,18 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync } from "fs";
+import { getValue, setValue, isStorageConfigured } from "./storage";
 
 // Environment variables
 export const config = {
-    // Bot configuration
     botToken: process.env.BOT_TOKEN || "",
     channelId: process.env.CHANNEL_ID || "",
-
-    // Source channels to monitor (comma-separated usernames without @)
     sourceChannels: (process.env.SOURCE_CHANNELS || "durov")
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
-
-    // How often to check for new messages (cron format)
-    cronSchedule: process.env.CRON_SCHEDULE || "*/5 * * * *", // every 5 mins
-
-    // Include source attribution in posts
+    cronSchedule: process.env.CRON_SCHEDULE || "*/5 * * * *",
     includeSource: process.env.INCLUDE_SOURCE !== "false",
-
-    // Data directory (must be /tmp on Hugging Face)
-    dataDir: process.env.DATA_DIR || "./public/data",
-    mediaDir: process.env.MEDIA_DIR || "./public/media",
+    dataDir: process.env.DATA_DIR || "/tmp/data",
+    mediaDir: process.env.MEDIA_DIR || "/tmp/media",
 };
 
 // Ensure directories exist
@@ -33,35 +25,42 @@ export function ensureDirectories() {
     }
 }
 
-// Last processed messages tracking
-const lastProcessedPath = () => `${config.dataDir}/last-messages.json`;
+// In-memory cache for last processed (synced with Supabase)
+let lastProcessedCache: Record<string, string> = {};
+let cacheLoaded = false;
 
-export function getLastProcessed(): Record<string, string> {
-    try {
-        if (existsSync(lastProcessedPath())) {
-            return JSON.parse(readFileSync(lastProcessedPath(), "utf-8"));
-        }
-    } catch {
-        // ignore
+/**
+ * Load last processed from Supabase (call on startup)
+ */
+export async function loadLastProcessed(): Promise<void> {
+    if (isStorageConfigured()) {
+        lastProcessedCache = await getValue<Record<string, string>>("last_processed", {});
+        console.log("[Config] Loaded last processed from Supabase:", Object.keys(lastProcessedCache).length, "channels");
     }
-    return {};
+    cacheLoaded = true;
 }
 
-export function setLastProcessed(channel: string, messageId: string) {
-    const data = getLastProcessed();
-    data[channel] = messageId;
-    writeFileSync(lastProcessedPath(), JSON.stringify(data, null, 2));
+/**
+ * Get last processed messages
+ */
+export function getLastProcessed(): Record<string, string> {
+    return lastProcessedCache;
+}
+
+/**
+ * Set last processed for a channel (async save to Supabase)
+ */
+export async function setLastProcessed(channel: string, messageId: string): Promise<void> {
+    lastProcessedCache[channel] = messageId;
+
+    if (isStorageConfigured()) {
+        await setValue("last_processed", lastProcessedCache);
+    }
 }
 
 // Validate config
 export function validateConfig() {
-    if (!config.botToken) {
-        throw new Error("BOT_TOKEN is required");
-    }
-    if (!config.channelId) {
-        throw new Error("CHANNEL_ID is required");
-    }
-    if (config.sourceChannels.length === 0) {
-        throw new Error("SOURCE_CHANNELS is required");
-    }
+    if (!config.botToken) throw new Error("BOT_TOKEN is required");
+    if (!config.channelId) throw new Error("CHANNEL_ID is required");
+    if (config.sourceChannels.length === 0) throw new Error("SOURCE_CHANNELS is required");
 }
