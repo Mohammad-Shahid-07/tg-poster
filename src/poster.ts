@@ -3,6 +3,7 @@ import { scrapeChannel, getNewMessages } from "./scraper";
 import { postMessage } from "./bot";
 import { evaluateContent, type AdminDecision } from "./ai-admin";
 import { isDuplicate, recordPost } from "./content-tracker";
+import { getPublicChannels, getChannels } from "./channel-manager";
 import type { TelegramMessage } from "./types";
 
 /**
@@ -13,7 +14,11 @@ export async function runPoster(): Promise<void> {
 
     const lastProcessed = getLastProcessed();
 
-    for (const channel of config.sourceChannels) {
+    // Use channels from manager, fallback to config
+    const channels = getChannels();
+    const publicChannels = channels.length > 0 ? getPublicChannels() : config.sourceChannels;
+
+    for (const channel of publicChannels) {
         try {
             console.log(`[Poster] Checking @${channel}...`);
 
