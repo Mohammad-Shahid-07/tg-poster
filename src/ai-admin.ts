@@ -202,21 +202,36 @@ export async function evaluateBatch(messages: Array<{ text: string; images: stri
 
     console.log(`[AI Admin] Batch processing ${messages.length} messages...`);
 
-    // Build batch prompt
+    // Build batch prompt - include original caption with images so AI knows context
     const messageDescriptions = messages.map((m, i) =>
-        `MESSAGE ${i + 1} from @${m.channel}:\n${m.text || "(no text)"}\n${m.images.length > 0 ? `[${m.images.length} images]` : ""}`
+        `MESSAGE ${i + 1} from @${m.channel}:\nORIGINAL CAPTION: ${m.text || "(no caption)"}\n${m.images.length > 0 ? `[${m.images.length} image(s) attached - use the caption above to understand image context]` : ""}`
     ).join("\n\n---\n\n");
 
-    const systemPrompt = `You are evaluating ${messages.length} messages for "${aiConfig.channel.name}".
+    const systemPrompt = `You are evaluating ${messages.length} messages for a REET-focused Rajasthan exam channel.
 
 For EACH message, decide if it should be posted and rewrite it.
+
+WHAT TO POST:
+- REET updates, notifications, PYQs (primary focus)
+- Other Rajasthan govt exams (RPSC, RSMSSB, Rajasthan Police, etc.)
+- Current affairs useful for exams
+- News related to any govt exams
+- PYQs from any exam
+- Educational content relevant to competitive exams
+
+CRITICAL - DO NOT FORCE TOPICS:
+- If content is about RPSC, keep it about RPSC (don't add "REET" to it)
+- If content is about Railway/SSC/Banking, keep it as is
+- PRESERVE the original exam/topic - never add unrelated exam names
+- Only SKIP if content is completely unrelated to exams or govt jobs
 
 STYLE RULES:
 - Keep it SHORT - 2-4 lines max
 - Use BILINGUAL - mix Hindi + English naturally
 - Be CASUAL - no formal corporate tone
 - NO filler text, excessive emojis, or unnecessary hashtags
-- Remove source channel branding
+- Remove source channel branding (@mentions, join links)
+- For images: use the ORIGINAL CAPTION to understand what the image is about
 
 RESPOND with JSON array (one object per message):
 [
