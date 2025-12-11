@@ -6,7 +6,7 @@ import { initBot } from "./bot";
 import { validateChannels } from "./scraper";
 import { loadPostedContent } from "./content-tracker";
 import { isStorageConfigured } from "./storage";
-import { loadSession, startAuth, completeAuth, getAuthStatus, isMTProtoConfigured } from "./mtproto-scraper";
+import { loadSession, startAuth, completeAuth, complete2FA, getAuthStatus, isMTProtoConfigured } from "./mtproto-scraper";
 import { loadChannels, getChannels, addChannel, removeChannel, getPublicChannels } from "./channel-manager";
 
 const PORT = process.env.PORT || 10000;
@@ -58,6 +58,10 @@ textarea{width:100%;height:80px;font-family:monospace;font-size:12px}
   <input type="text" name="code" placeholder="Enter code" required>
   <button type="submit">Verify</button>
 </form>
+<form id="twoFAForm" style="display:none">
+  <input type="password" name="password" placeholder="2FA Password" required>
+  <button type="submit">Submit Password</button>
+</form>
 <div id="sessionDiv" style="display:none">
   <p><strong>Copy this to SESSION_STRING env var:</strong></p>
   <textarea id="sessionStr" readonly></textarea>
@@ -67,6 +71,7 @@ textarea{width:100%;height:80px;font-family:monospace;font-size:12px}
 const status = document.getElementById('status');
 const phoneForm = document.getElementById('phoneForm');
 const codeForm = document.getElementById('codeForm');
+const twoFAForm = document.getElementById('twoFAForm');
 const sessionDiv = document.getElementById('sessionDiv');
 const sessionStr = document.getElementById('sessionStr');
 
@@ -91,13 +96,36 @@ codeForm.onsubmit=async e=>{
   const r=await fetch('/auth/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:e.target.code.value})});
   const d=await r.json();
   if(d.success){
-    status.textContent='✅ Success! Copy the session string below and add to SESSION_STRING env var, then redeploy.';
+    showSession(d.session);
+  } else if(d.needs2FA){
+    status.textContent='2FA Required - Enter your Telegram password';
     codeForm.style.display='none';
-    sessionDiv.style.display='block';
-    sessionStr.value=d.session;
+    twoFAForm.style.display='block';
+  } else {
+    status.textContent='Error: '+d.error;
   }
-  else status.textContent='Error: '+d.error;
 };
+
+twoFAForm.onsubmit=async e=>{
+  e.preventDefault();
+  status.textContent='Verifying password...';
+  const r=await fetch('/auth/2fa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:e.target.password.value})});
+  const d=await r.json();
+  if(d.success){
+    showSession(d.session);
+  } else {
+    status.textContent='Error: '+d.error;
+  }
+};
+
+function showSession(session){
+  status.textContent='✅ Success! Copy the session string below and add to SESSION_STRING env var, then redeploy.';
+  phoneForm.style.display='none';
+  codeForm.style.display='none';
+  twoFAForm.style.display='none';
+  sessionDiv.style.display='block';
+  sessionStr.value=session;
+}
 </script></body></html>`;
 
 // Channels management page
@@ -253,6 +281,15 @@ createServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (url === "/auth/verify" && req.method === "POST") {
         const body = await parseBody(req);
         const result = await completeAuth(body.code);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+        return;
+    }
+
+    // 2FA password
+    if (url === "/auth/2fa" && req.method === "POST") {
+        const body = await parseBody(req);
+        const result = await complete2FA(body.password);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(result));
         return;

@@ -46,14 +46,11 @@ export async function loadSession(): Promise<boolean> {
 }
 
 /**
- * Save session string to Supabase
+ * Save session string (just in-memory, user will copy to env)
  */
-async function saveSession(session: string): Promise<void> {
+function saveSession(session: string): void {
     sessionString = session;
-    if (isStorageConfigured()) {
-        await setValue("session_string", session);
-        console.log("[MTProto] Session saved to Supabase");
-    }
+    console.log("[MTProto] Session generated - copy to SESSION_STRING env var");
 }
 
 /**
@@ -155,7 +152,7 @@ export async function startAuth(phoneNumber: string): Promise<{ success: boolean
 /**
  * Complete auth - verify code
  */
-export async function completeAuth(code: string): Promise<{ success: boolean; session?: string; error?: string }> {
+export async function completeAuth(code: string): Promise<{ success: boolean; session?: string; needs2FA?: boolean; error?: string }> {
     if (!authState.pendingClient || !authState.phoneNumber || !authState.phoneCodeHash) {
         return { success: false, error: "No pending auth. Start auth first." };
     }
@@ -169,24 +166,62 @@ export async function completeAuth(code: string): Promise<{ success: boolean; se
             })
         );
 
-        // Get session string
-        const session = authState.pendingClient.session.save() as unknown as string;
-
-        // Save to Supabase temporarily (user should copy to env)
-        await saveSession(session);
-
-        // Update global client
-        client = authState.pendingClient;
-        authState = {};
-
-        // Return session for user to copy
-        return { success: true, session };
+        // Success without 2FA
+        return await finishAuth();
     } catch (err: any) {
         if (err.message.includes("SESSION_PASSWORD_NEEDED")) {
-            return { success: false, error: "2FA required. Not supported yet." };
+            // Need 2FA - keep state and return flag
+            return { success: false, needs2FA: true };
         }
         return { success: false, error: err.message };
     }
+}
+
+/**
+ * Complete 2FA - verify password
+ */
+export async function complete2FA(password: string): Promise<{ success: boolean; session?: string; error?: string }> {
+    if (!authState.pendingClient) {
+        return { success: false, error: "No pending auth. Start auth first." };
+    }
+
+    try {
+        const { Api } = await import("telegram/tl");
+
+        // Get password info
+        const passwordInfo = await authState.pendingClient.invoke(
+            new Api.account.GetPassword()
+        );
+
+        // Calculate SRP parameters
+        const { computeCheck } = await import("telegram/Password");
+        const srpResult = await computeCheck(passwordInfo, password);
+
+        // Submit password
+        await authState.pendingClient.invoke(
+            new Api.auth.CheckPassword({ password: srpResult })
+        );
+
+        return await finishAuth();
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+}
+
+/**
+ * Finish auth and return session
+ */
+async function finishAuth(): Promise<{ success: boolean; session?: string; error?: string }> {
+    if (!authState.pendingClient) {
+        return { success: false, error: "No pending client" };
+    }
+
+    const session = authState.pendingClient.session.save() as unknown as string;
+    await saveSession(session);
+    client = authState.pendingClient;
+    authState = {};
+
+    return { success: true, session };
 }
 
 /**
@@ -198,3 +233,4 @@ export function getAuthStatus(): { configured: boolean; authenticated: boolean }
         authenticated: Boolean(sessionString),
     };
 }
+
