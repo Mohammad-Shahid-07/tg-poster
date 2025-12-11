@@ -93,6 +93,39 @@ export async function postMessage(
         }
     }
 
+    // If there are documents (PDFs, files), download and send
+    if (message.documents && message.documents.length > 0) {
+        const doc = message.documents[0];
+        if (!doc?.url) return;
+
+        try {
+            console.log(`[Bot] Downloading document: ${doc.title}`);
+            const docPath = await downloadMedia(doc.url, `${message.id}_doc`);
+
+            if (docPath) {
+                await b.api.sendDocument(config.channelId, new InputFile(docPath), {
+                    caption: text || doc.title,
+                    parse_mode: "HTML",
+                });
+                cleanupMedia(docPath);
+                return;
+            }
+        } catch (err) {
+            console.error("[Bot] Failed to send document:", err);
+        }
+
+        // Fallback: try URL directly
+        try {
+            await b.api.sendDocument(config.channelId, doc.url, {
+                caption: text || doc.title,
+                parse_mode: "HTML",
+            });
+            return;
+        } catch {
+            // Fall through to text
+        }
+    }
+
     // Fallback to text only
     if (text.trim()) {
         await postText(text);

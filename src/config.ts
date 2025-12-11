@@ -1,14 +1,10 @@
 import { existsSync, mkdirSync } from "fs";
-import { getValue, setValue, isStorageConfigured } from "./storage";
+import { getValue, setValue, isStorageConfigured } from "./data/storage";
 
 // Environment variables
 export const config = {
     botToken: process.env.BOT_TOKEN || "",
     channelId: process.env.CHANNEL_ID || "",
-    sourceChannels: (process.env.SOURCE_CHANNELS || "durov")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
     cronSchedule: process.env.CRON_SCHEDULE || "*/5 * * * *",
     includeSource: process.env.INCLUDE_SOURCE !== "false",
     dataDir: process.env.DATA_DIR || "/tmp/data",
@@ -62,5 +58,4 @@ export async function setLastProcessed(channel: string, messageId: string): Prom
 export function validateConfig() {
     if (!config.botToken) throw new Error("BOT_TOKEN is required");
     if (!config.channelId) throw new Error("CHANNEL_ID is required");
-    if (config.sourceChannels.length === 0) throw new Error("SOURCE_CHANNELS is required");
 }

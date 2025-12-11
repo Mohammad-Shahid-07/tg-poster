@@ -13,6 +13,9 @@ export interface AdminDecision {
     transformedText: string;
 }
 
+// Alias for batch processing
+export type BatchDecision = AdminDecision;
+
 interface MistralMessage {
     role: "user" | "assistant" | "system";
     content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>;
@@ -186,4 +189,76 @@ export async function analyzeImage(imageUrl: string): Promise<string | null> {
     }];
 
     return callMistral(messages, aiConfig.models.imageAnalysis, 300);
+}
+
+/**
+ * Batch evaluation - evaluate multiple messages in a single AI call
+ * Returns one decision per message
+ */
+export async function evaluateBatch(messages: Array<{ text: string; images: string[]; channel: string }>): Promise<AdminDecision[]> {
+    if (!MISTRAL_API_KEY || messages.length === 0) {
+        return messages.map(m => ({ shouldPost: true, reason: "No AI", transformedText: m.text }));
+    }
+
+    console.log(`[AI Admin] Batch processing ${messages.length} messages...`);
+
+    // Build batch prompt
+    const messageDescriptions = messages.map((m, i) =>
+        `MESSAGE ${i + 1} from @${m.channel}:\n${m.text || "(no text)"}\n${m.images.length > 0 ? `[${m.images.length} images]` : ""}`
+    ).join("\n\n---\n\n");
+
+    const systemPrompt = `You are evaluating ${messages.length} messages for "${aiConfig.channel.name}".
+
+For EACH message, decide if it should be posted and rewrite it.
+
+STYLE RULES:
+- Keep it SHORT - 2-4 lines max
+- Use BILINGUAL - mix Hindi + English naturally
+- Be CASUAL - no formal corporate tone
+- NO filler text, excessive emojis, or unnecessary hashtags
+- Remove source channel branding
+
+RESPOND with JSON array (one object per message):
+[
+  {"shouldPost": true/false, "reason": "short reason", "transformedText": "your version"},
+  ...
+]`;
+
+    const apiMessages: MistralMessage[] = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Here are ${messages.length} messages to evaluate:\n\n${messageDescriptions}` }
+    ];
+
+    const response = await callMistral(apiMessages, aiConfig.models.textDecision, 2000);
+
+    if (!response) {
+        console.warn("[AI Admin] Batch failed - returning originals");
+        return messages.map(m => ({ shouldPost: true, reason: "AI unavailable", transformedText: m.text }));
+    }
+
+    try {
+        // Parse JSON array response
+        let jsonStr = response;
+        const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (jsonMatch?.[1]) jsonStr = jsonMatch[1];
+
+        // Find array in response
+        const arrayMatch = jsonStr.match(/\[[\s\S]*\]/);
+        if (arrayMatch) jsonStr = arrayMatch[0];
+
+        const decisions = JSON.parse(jsonStr.trim()) as AdminDecision[];
+
+        // Ensure we have a decision for each message
+        return messages.map((m, i) => {
+            const d = decisions[i];
+            if (!d || typeof d.shouldPost !== "boolean") {
+                return { shouldPost: true, reason: "Parse error", transformedText: m.text };
+            }
+            console.log(`[AI Admin] Msg ${i + 1}: ${d.shouldPost ? "✅" : "❌"} ${d.reason}`);
+            return d;
+        });
+    } catch (err) {
+        console.error("[AI Admin] Batch parse failed:", response.slice(0, 300));
+        return messages.map(m => ({ shouldPost: true, reason: "Parse failed", transformedText: m.text }));
+    }
 }

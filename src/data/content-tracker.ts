@@ -3,7 +3,7 @@
  */
 
 import { getValue, setValue, isStorageConfigured } from "./storage";
-import { aiConfig } from "./ai-config";
+import { aiConfig } from "../ai-config";
 
 interface PostedContent {
     summary: string;
@@ -116,10 +116,20 @@ export async function isDuplicate(text: string, imageCount: number): Promise<{ i
         const data = (await response.json()) as any;
         let content = data.choices?.[0]?.message?.content || "";
 
-        const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-        if (jsonMatch?.[1]) content = jsonMatch[1];
+        // Extract JSON - try multiple patterns
+        let jsonStr = content;
+        const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (codeBlockMatch?.[1]) {
+            jsonStr = codeBlockMatch[1];
+        } else {
+            // Find JSON object directly
+            const jsonObjMatch = content.match(/\{[\s\S]*\}/);
+            if (jsonObjMatch) {
+                jsonStr = jsonObjMatch[0];
+            }
+        }
 
-        const result = JSON.parse(content.trim());
+        const result = JSON.parse(jsonStr.trim());
 
         if (result.isDuplicate && result.matchedPost) {
             const matched = recentPosts[result.matchedPost - 1];

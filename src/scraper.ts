@@ -156,6 +156,18 @@ export async function scrapeChannel(
                 }
             });
 
+            // Get documents (PDFs, files)
+            const documents: { url: string; title: string; size?: string }[] = [];
+            $bubble.find(".tgme_widget_message_document_wrap").each((_, doc) => {
+                const $doc = $(doc);
+                const url = $doc.attr("href") || "";
+                const title = $doc.find(".tgme_widget_message_document_title").text().trim() || "document";
+                const size = $doc.find(".tgme_widget_message_document_extra").text().trim();
+                if (url) {
+                    documents.push({ url, title, size });
+                }
+            });
+
             messages.push({
                 id,
                 text,
@@ -163,6 +175,7 @@ export async function scrapeChannel(
                 date,
                 images,
                 videos,
+                documents,
                 links,
                 channel: channelUsername,
             });
