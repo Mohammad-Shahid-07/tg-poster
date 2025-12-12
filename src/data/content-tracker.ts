@@ -73,10 +73,20 @@ async function generateSummary(text: string): Promise<string> {
 /**
  * Check for duplicates using AI
  */
-export async function isDuplicate(text: string, imageCount: number): Promise<{ isDupe: boolean; reason?: string }> {
+export async function isDuplicate(text: string, imageCount: number, imageUrls: string[] = []): Promise<{ isDupe: boolean; reason?: string }> {
     if (!text.trim() && imageCount === 0) return { isDupe: false };
 
-    const currentHash = hashContent(text);
+    // Include image identifiers in hash for better image-based duplicate detection
+    const imageFingerprint = imageUrls
+        .map(url => {
+            const match = url.match(/\/([^\/]+)\.(jpg|jpeg|png|webp)$/i);
+            return match ? match[1] : url.split('/').pop() || "";
+        })
+        .sort()
+        .join("|");
+
+    const contentToHash = `${text}::${imageFingerprint}`;
+    const currentHash = hashContent(contentToHash);
 
     // Exact hash match
     const exactMatch = postsCache.find((p) => p.hash === currentHash);
@@ -148,12 +158,23 @@ export async function isDuplicate(text: string, imageCount: number): Promise<{ i
 /**
  * Record a post
  */
-export async function recordPost(text: string, sourceChannel: string, originalId: string): Promise<void> {
+export async function recordPost(text: string, sourceChannel: string, originalId: string, imageUrls: string[] = []): Promise<void> {
     const summary = await generateSummary(text);
+
+    // Include image identifiers in hash (consistent with isDuplicate)
+    const imageFingerprint = imageUrls
+        .map(url => {
+            const match = url.match(/\/([^\/]+)\.(jpg|jpeg|png|webp)$/i);
+            return match ? match[1] : url.split('/').pop() || "";
+        })
+        .sort()
+        .join("|");
+
+    const contentToHash = `${text}::${imageFingerprint}`;
 
     postsCache.push({
         summary,
-        hash: hashContent(text),
+        hash: hashContent(contentToHash),
         sourceChannel,
         originalId,
         postedAt: new Date().toISOString(),

@@ -106,6 +106,18 @@ export async function evaluateContent(
     // Build the prompt - this is the key part
     const systemPrompt = `You are admin for "${aiConfig.channel.name}".
 
+🚫 ABSOLUTELY REJECT (shouldPost: false) - NO EXCEPTIONS:
+1. PROMOTIONAL/SCAM CONTENT:
+   - Money-making schemes ("₹100 to ₹200,000", "earn lakhs", "double your money")
+   - Stock/trading tips, investment advice
+   - Crypto, forex, gambling promotions
+   - "Join my channel for tips" or paid group promotions
+   - MLM, affiliate marketing, get-rich-quick schemes
+   - Any "financial freedom" or "passive income" claims
+2. OFF-TOPIC CONTENT:
+   - Content not related to govt exams or education
+   - Random entertainment, memes, jokes (unless exam-related)
+
 STYLE RULES (VERY IMPORTANT):
 1. Keep it SHORT - 2-4 lines max, no essays
 2. Use BILINGUAL - mix Hindi + English naturally (Hinglish style)
@@ -246,6 +258,18 @@ export async function evaluateBatch(messages: Array<{ text: string; images: stri
     const systemPrompt = `You are evaluating ${messages.length} messages for a REET-focused Rajasthan exam channel.
 
 For EACH message, decide if it should be posted and rewrite it.
+
+🚫 ABSOLUTELY REJECT (shouldPost: false) - NO EXCEPTIONS:
+1. PROMOTIONAL/SCAM CONTENT:
+   - Money-making schemes ("₹100 to ₹200,000", "earn lakhs", "double your money")
+   - Stock/trading tips, investment advice
+   - Crypto, forex, gambling promotions
+   - "Join my channel for tips" or paid group promotions
+   - MLM, affiliate marketing, get-rich-quick schemes
+   - Any "financial freedom" or "passive income" claims
+2. OFF-TOPIC CONTENT:
+   - Content not related to govt exams or education
+   - Random entertainment, memes, jokes (unless exam-related)
 
 WHAT TO POST:
 - REET updates, notifications, PYQs (primary focus)

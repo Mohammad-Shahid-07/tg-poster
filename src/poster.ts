@@ -89,7 +89,7 @@ export async function runPoster(): Promise<void> {
     // ==========================================
     const uniqueMessages: TelegramMessage[] = [];
     for (const msg of allMessages) {
-        const dupeCheck = await isDuplicate(msg.text, msg.images.length);
+        const dupeCheck = await isDuplicate(msg.text, msg.images.length, msg.images);
         if (dupeCheck.isDupe) {
             console.log(`[Poster] ⏭️ Skipping duplicate from @${msg.channel}: ${dupeCheck.reason}`);
             setLastProcessed(msg.channel, msg.id);
@@ -225,13 +225,14 @@ async function processSingleMessage(message: TelegramMessage): Promise<void> {
     };
 
     await postMessageWithRetry(transformedMessage);
-    await recordPost(transformedMessage.text, message.channel, message.id);
+    await recordPost(transformedMessage.text, message.channel, message.id, message.images);
     setLastProcessed(message.channel, message.id);
 }
 
 /**
  * Get a content fingerprint for deduplication
- * Combines text/caption + document filenames
+ * Combines text/caption + document filenames + image URLs
+ * This helps catch duplicates when same images are posted across channels
  */
 function getContentFingerprint(msg: TelegramMessage): string {
     const textPart = (msg.text || "").trim().toLowerCase();
@@ -239,7 +240,16 @@ function getContentFingerprint(msg: TelegramMessage): string {
         .map(d => d.title?.toLowerCase() || "")
         .sort()
         .join("|");
-    return `${textPart}::${docPart}`;
+    // Include image URLs - extract just the unique part (file ID from Telegram)
+    // URLs like https://cdn5.cdn-telegram.org/file/xxx/yyy.jpg - we want yyy part
+    const imagePart = (msg.images || [])
+        .map(url => {
+            const match = url.match(/\/([^\/]+)\.(jpg|jpeg|png|webp)$/i);
+            return match ? match[1]?.toLowerCase() : url.split('/').pop()?.toLowerCase() || "";
+        })
+        .sort()
+        .join("|");
+    return `${textPart}::${docPart}::${imagePart}`;
 }
 
 /**
@@ -310,7 +320,7 @@ async function processBatch(messages: TelegramMessage[]): Promise<void> {
         };
 
         await postMessageWithRetry(transformedMessage);
-        await recordPost(transformedMessage.text, message.channel, message.id);
+        await recordPost(transformedMessage.text, message.channel, message.id, message.images);
         setLastProcessed(message.channel, message.id);
 
         // Small delay between posts
@@ -357,7 +367,7 @@ export async function processRealtimeMessage(message: TelegramMessage): Promise<
     console.log(`[Realtime] Processing message from @${message.channel}...`);
 
     // Check for duplicate
-    const dupeCheck = await isDuplicate(message.text, message.images.length);
+    const dupeCheck = await isDuplicate(message.text, message.images.length, message.images);
     if (dupeCheck.isDupe) {
         console.log(`[Realtime] ⏭️ Skipping duplicate: ${dupeCheck.reason}`);
         setLastProcessed(message.channel, message.id);
@@ -384,7 +394,7 @@ export async function processRealtimeMessage(message: TelegramMessage): Promise<
     };
 
     await postMessageWithRetry(transformedMessage);
-    await recordPost(transformedMessage.text, message.channel, message.id);
+    await recordPost(transformedMessage.text, message.channel, message.id, message.images);
     setLastProcessed(message.channel, message.id);
 
     console.log(`[Realtime] ✅ Posted instantly from @${message.channel}`);
