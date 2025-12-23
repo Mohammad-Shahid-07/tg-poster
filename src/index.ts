@@ -8,10 +8,10 @@ import { initBot } from "./bot";
 import { validateChannels } from "./scraper";
 import { loadPostedContent } from "./data/content-tracker";
 import { isStorageConfigured } from "./data/storage";
-import { loadSession, getAuthStatus, isMTProtoConfigured, startRealtimeUpdates } from "./mtproto-scraper";
-import { loadChannels, getPublicChannels, getMTProtoChannels } from "./data/channels";
+import { loadSession, getAuthStatus, isMTProtoConfigured } from "./mtproto-scraper";
+import { loadChannels, getPublicChannels } from "./data/channels";
 import { startServer } from "./server";
-import { processRealtimeMessage } from "./poster";
+import { initQuizModule } from "./quiz";
 
 async function main() {
   console.log("=================================");
@@ -42,13 +42,12 @@ async function main() {
     const status = getAuthStatus();
     if (status.authenticated) {
       console.log("[MTProto] Session available - can access private channels");
-      // Real-time updates disabled for now (causes timeout issues)
-      // Will use regular polling for MTProto channels
     } else {
       console.log("[MTProto] Not authenticated - visit /auth to login");
     }
   }
 
+  // Initialize bot
   initBot();
 
   // Start HTTP server
@@ -65,9 +64,14 @@ async function main() {
     console.log("[Info] No channels configured. Add channels at /channels");
   }
 
+  // Initialize quiz module (runs on 8 AM and 8 PM IST schedule)
+  await initQuizModule();
+
+  // Run initial poster check
   console.log("[Startup] Running initial check...");
   await runPoster();
 
+  // Schedule poster cron job
   console.log(`[Scheduler] Cron: ${config.cronSchedule}`);
   cron.schedule(config.cronSchedule, () => runPoster());
 
